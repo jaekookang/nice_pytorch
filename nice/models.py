@@ -1,21 +1,26 @@
 """
 Implementation of models from paper.
 """
+import ipdb as pdb
 import torch
 import torch.nn as nn
 import torch.nn.init as init
 from .layers import AdditiveCouplingLayer
 
+
 def _build_relu_network(latent_dim, hidden_dim, num_layers):
     """Helper function to construct a ReLU network of varying number of layers."""
-    _modules = [ nn.Linear(latent_dim, hidden_dim) ]
+    # ==> 이놈이 self.nonlinearity임
+    # ==> 이놈이 Deep Neural Net인 m(.) 임
+    _modules = [nn.Linear(latent_dim, hidden_dim)]
     for _ in range(num_layers):
-        _modules.append( nn.Linear(hidden_dim, hidden_dim) )
-        _modules.append( nn.ReLU() )
-        _modules.append( nn.BatchNorm1d(hidden_dim) )
-    _modules.append( nn.Linear(hidden_dim, latent_dim) )
-    return nn.Sequential( *_modules )
-    
+        _modules.append(nn.Linear(hidden_dim, hidden_dim))
+        _modules.append(nn.ReLU())
+        _modules.append(nn.BatchNorm1d(hidden_dim))
+    _modules.append(nn.Linear(hidden_dim, latent_dim))
+    # Linear=>L.ReLU.BN=>L.ReLU.BN=>L.ReLU.BN=>L.ReLU.BN=>Linear
+    return nn.Sequential(*_modules)
+
 
 class NICEModel(nn.Module):
     """
@@ -29,18 +34,24 @@ class NICEModel(nn.Module):
       five-layer RELUs
     * a diagonal scaling matrix output layer
     """
+
     def __init__(self, input_dim, hidden_dim, num_layers):
         super(NICEModel, self).__init__()
-        assert (input_dim % 2 == 0), "[NICEModel] only even input dimensions supported for now"
+        assert (input_dim % 2 ==
+                0), "[NICEModel] only even input dimensions supported for now"
         assert (num_layers > 2), "[NICEModel] num_layers must be at least 3"
         self.input_dim = input_dim
         half_dim = int(input_dim / 2)
-        self.layer1 = AdditiveCouplingLayer(input_dim, 'odd', _build_relu_network(half_dim, hidden_dim, num_layers))
-        self.layer2 = AdditiveCouplingLayer(input_dim, 'even', _build_relu_network(half_dim, hidden_dim, num_layers))
-        self.layer3 = AdditiveCouplingLayer(input_dim, 'odd', _build_relu_network(half_dim, hidden_dim, num_layers))
-        self.layer4 = AdditiveCouplingLayer(input_dim, 'even', _build_relu_network(half_dim, hidden_dim, num_layers))
+        self.layer1 = AdditiveCouplingLayer(
+            input_dim, 'odd', _build_relu_network(half_dim, hidden_dim, num_layers))
+        self.layer2 = AdditiveCouplingLayer(
+            input_dim, 'even', _build_relu_network(half_dim, hidden_dim, num_layers))
+        self.layer3 = AdditiveCouplingLayer(
+            input_dim, 'odd', _build_relu_network(half_dim, hidden_dim, num_layers))
+        self.layer4 = AdditiveCouplingLayer(
+            input_dim, 'even', _build_relu_network(half_dim, hidden_dim, num_layers))
+        # Trainable scaling matrix
         self.scaling_diag = nn.Parameter(torch.ones(input_dim))
-
         # randomly initialize weights:
         for p in self.layer1.parameters():
             if len(p.shape) > 1:
@@ -61,13 +72,12 @@ class NICEModel(nn.Module):
             if len(p.shape) > 1:
                 init.kaiming_uniform_(p, nonlinearity='relu')
             else:
-                init.normal_(p, mean=0., std=0.001)        
-
+                init.normal_(p, mean=0., std=0.001)
 
     def forward(self, xs):
         """
         Forward pass through all invertible coupling layers.
-        
+
         Args:
         * xs: float tensor of shape (B,dim).
 
@@ -81,11 +91,11 @@ class NICEModel(nn.Module):
         ys = torch.matmul(ys, torch.diag(torch.exp(self.scaling_diag)))
         return ys
 
-
     def inverse(self, ys):
         """Invert a set of draws from gaussians"""
         with torch.no_grad():
-            xs = torch.matmul(ys, torch.diag(torch.reciprocal(torch.exp(self.scaling_diag))))
+            xs = torch.matmul(ys, torch.diag(
+                torch.reciprocal(torch.exp(self.scaling_diag))))
             xs = self.layer4.inverse(xs)
             xs = self.layer3.inverse(xs)
             xs = self.layer2.inverse(xs)
